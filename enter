@@ -8,12 +8,18 @@ import os
 from datetime import datetime
 import configparser
 import re
+import warnings
+
+import win32gui
+import win32con
+import win32api
+import win32com.client
 
 # ========================================
 # Instellingenbestanden en paden
 # ========================================
-SETTINGS_FILE = "settings.ini"         # Settings-bestand
-TRIGGER_LOG_FILE = "triggers.json"     # Resultatenlog
+SETTINGS_FILE = "settings.ini"
+TRIGGER_LOG_FILE = "triggers.json"
 
 # ========================================
 # Default instellingen aanmaken
@@ -65,58 +71,77 @@ def log_trigger_to_json(message):
     with open(TRIGGER_LOG_FILE, 'w') as file:
         json.dump(data, file, indent=4)
 
+# ========================================
+# Function to bring the window to front
+# ========================================
+def bring_window_to_front(hwnd):
+    """
+    Activeert het venster en zorgt ervoor dat het naar voren wordt gehaald,
+    zelfs in een RDP-omgeving.
+    """
+    shell = win32com.client.Dispatch("WScript.Shell")
+    win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)  # Haal het venster uit geminimaliseerd staat
+    shell.SendKeys('%')  # Simuleert het indrukken van de ALT-toets om focus toe te staan
+    time.sleep(0.2)  # Geef Windows even de tijd om het venster naar voren te brengen
+    win32gui.SetForegroundWindow(hwnd)  # Zet het venster op de voorgrond
 
+# ========================================
+# Main loop voor detectie en actie
+# ========================================
 def focus_and_click_loop():
     i = 0
     title_pattern = r"^\[[A-Z0-9]+\] Artikel batchmatig verwijderen.*"
-    #title_pattern = r"^\[M00170\]Artikel batchmatig verwijderen.*"
-  
-
 
     while True:
         time.sleep(pause_duration)
         try:
-            print("Zoeken naar trigger")
+            print("Zoeken naar trigger...")
 
-            all_windows = Desktop(backend='win64').windows()
+            all_windows = Desktop(backend='win32').windows()
             matched = False
 
             for win in all_windows:
                 title = win.window_text()
 
-                window_title = r"^\[[A-Z0-9]+\] Artikel batchmatig verwijderen.*"
-
                 if re.match(title_pattern, title):
                     try:
+                        hwnd = win.handle
 
+                        # Breng het venster naar voren
+                        bring_window_to_front(hwnd)
 
-                        win.set_focus()
-                        pyautogui.press('enter')
-                        trigger_message = f"Trigger {i + 1}: Op 'Enter' gedrukt op venster '{title}'"
+                        # Stuur de Enter-toets naar het venster
+                        win32api.PostMessage(hwnd, win32con.WM_KEYDOWN, win32con.VK_RETURN, 0)
+                        win32api.PostMessage(hwnd, win32con.WM_KEYUP, win32con.VK_RETURN, 0)
+
+                        trigger_message = f"Trigger {i + 1}: ENTER gestuurd naar '{title}'"
                         print(trigger_message)
-                        
                         log_trigger_to_json(trigger_message)
                         i += 1
                         matched = True
                         break
-                    except Exception as e:
-                        print("Kon geen focus zetten of enter doen")
-                        print("Try to fix")
-                        window = gw.getWindowsWithTitle(window_title)[0]
-                        window.activate()
-                        window.setfocus()
-                        time.sleep(0.5)
-                        pyautogui.press('space')   # spatie                                       
-                        pyautogui.press('enter')   # selecteer
 
+                    except Exception as e:
+                        print("Fout bij focus/Enter via Win32:", e)
+                        try:
+                            # Fallback: probeer venster via pygetwindow
+                            window = gw.getWindowsWithTitle(title)[0]
+                            window.activate()
+                            time.sleep(0.5)
+                            pyautogui.press('space')
+                            pyautogui.press('enter')
+                        except Exception as fallback_error:
+                            print("Fallback mislukt:", fallback_error)
 
             if not matched:
-                print("Geen Trigger.")
+                print("Geen match gevonden.")
 
         except Exception as e:
             print(f"Onverwachte fout: {e}")
 
-
+# ========================================
+# Programma starten
+# ========================================
 if __name__ == "__main__":
     input("Druk op Enter om te starten. Druk Ctrl+C om te stoppen...\n")
     focus_and_click_loop()
