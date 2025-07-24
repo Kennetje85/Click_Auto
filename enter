@@ -1,0 +1,122 @@
+from pywinauto import Desktop
+from pywinauto.findwindows import ElementNotFoundError
+import pygetwindow as gw
+import time
+import pyautogui
+import json
+import os
+from datetime import datetime
+import configparser
+import re
+
+# ========================================
+# Instellingenbestanden en paden
+# ========================================
+SETTINGS_FILE = "settings.ini"         # Settings-bestand
+TRIGGER_LOG_FILE = "triggers.json"     # Resultatenlog
+
+# ========================================
+# Default instellingen aanmaken
+# ========================================
+def create_default_settings():
+    config = configparser.ConfigParser()
+    config['DEFAULT'] = {
+        'pause': '0.5',
+        'storeresult': 'yes'
+    }
+    with open(SETTINGS_FILE, 'w') as configfile:
+        config.write(configfile)
+
+if not os.path.exists(SETTINGS_FILE):
+    create_default_settings()
+
+# ========================================
+# Instellingen inladen
+# ========================================
+config = configparser.ConfigParser()
+config.read(SETTINGS_FILE)
+
+pause_duration = float(config['DEFAULT'].get('pause', 0.5))
+store_result = config['DEFAULT'].get('storeresult', 'yes').lower() == 'yes'
+
+# ========================================
+# Logfunctie voor triggers
+# ========================================
+def log_trigger_to_json(message):
+    if not store_result:
+        return
+    
+    log_entry = {
+        "timestamp": datetime.now().isoformat(),
+        "message": message,
+    }
+
+    if os.path.exists(TRIGGER_LOG_FILE):
+        with open(TRIGGER_LOG_FILE, 'r') as file:
+            try:
+                data = json.load(file)
+            except json.JSONDecodeError:
+                data = []
+    else:
+        data = []
+
+    data.append(log_entry)
+
+    with open(TRIGGER_LOG_FILE, 'w') as file:
+        json.dump(data, file, indent=4)
+
+
+def focus_and_click_loop():
+    i = 0
+    title_pattern = r"^\[[A-Z0-9]+\] Artikel batchmatig verwijderen.*"
+    #title_pattern = r"^\[M00170\]Artikel batchmatig verwijderen.*"
+  
+
+
+    while True:
+        time.sleep(pause_duration)
+        try:
+            print("Zoeken naar trigger")
+
+            all_windows = Desktop(backend='win64').windows()
+            matched = False
+
+            for win in all_windows:
+                title = win.window_text()
+
+                window_title = r"^\[[A-Z0-9]+\] Artikel batchmatig verwijderen.*"
+
+                if re.match(title_pattern, title):
+                    try:
+
+
+                        win.set_focus()
+                        pyautogui.press('enter')
+                        trigger_message = f"Trigger {i + 1}: Op 'Enter' gedrukt op venster '{title}'"
+                        print(trigger_message)
+                        
+                        log_trigger_to_json(trigger_message)
+                        i += 1
+                        matched = True
+                        break
+                    except Exception as e:
+                        print("Kon geen focus zetten of enter doen")
+                        print("Try to fix")
+                        window = gw.getWindowsWithTitle(window_title)[0]
+                        window.activate()
+                        window.setfocus()
+                        time.sleep(0.5)
+                        pyautogui.press('space')   # spatie                                       
+                        pyautogui.press('enter')   # selecteer
+
+
+            if not matched:
+                print("Geen Trigger.")
+
+        except Exception as e:
+            print(f"Onverwachte fout: {e}")
+
+
+if __name__ == "__main__":
+    input("Druk op Enter om te starten. Druk Ctrl+C om te stoppen...\n")
+    focus_and_click_loop()
